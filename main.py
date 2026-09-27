@@ -1,17 +1,30 @@
 import os
 import time
 import smtplib
+from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google import genai
 from google.genai import types
+
+# 台灣時區 (UTC+8)
+TW_TZ = timezone(timedelta(hours=8))
+
+def tw_now():
+    """取得台灣當前時間"""
+    return datetime.now(TW_TZ)
+
+def tw_strftime(fmt):
+    """用台灣時間格式化時間字串"""
+    return tw_now().strftime(fmt)
 
 def send_email(subject, body):
     sender_email = "asingadmin@gmail.com"
     # ⭐ 在這裡設定多個收件人信箱（想加幾個就加幾個）
     receiver_emails = [
         "asingadmin@gmail.com",
-        "Kenfungkenfungkenfung@gmail.com",
+        # "second_user@gmail.com",   # 取消註解並填入第 2 個信箱
+        # "third_user@company.com",  # 取消註解並填入第 3 個信箱
     ]
 
     app_password = os.environ.get("GMAIL_APP_PASSWORD")
@@ -41,7 +54,7 @@ def run_tw_stock_agent():
         print("錯誤：找不到 GEMINI_API_KEY 環境變數")
         return
 
-    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 台股策略晨報 Agent 執行中...")
+    print(f"\n[{tw_strftime('%Y-%m-%d %H:%M:%S')}] 台股策略晨報 Agent 執行中...")
     client = genai.Client()
 
     available_models = [
@@ -154,7 +167,7 @@ def run_tw_stock_agent():
         print("\n【台股策略晨報】\n")
         print(report_content)
         send_email(
-            subject=f"📈 [台股策略晨報] 領先指標與操盤戰略 ({time.strftime('%Y-%m-%d %H:%M')})",
+            subject=f"📈 [台股策略晨報] 領先指標與操盤戰略 ({tw_strftime('%Y-%m-%d %H:%M')})",
             body=report_content
         )
     else:
