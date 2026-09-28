@@ -240,7 +240,12 @@ def send_email(subject, html_body, plain_body):
     # ⭐ 在這裡設定多個收件人信箱（想加幾個就加幾個）
     receiver_emails = [
         "asingadmin@gmail.com",
+<<<<<<< HEAD
         "Kenfungkenfungkenfung@gmail.com",
+=======
+        "Kenfungkenfungkenfung@gmail.com",   # 取消註解並填入第 2 個信箱
+        # "third_user@company.com",  # 取消註解並填入第 3 個信箱
+>>>>>>> 2a4da66ef9b78f07f1a4f7a1d573e3c90089b879
     ]
 
     app_password = os.environ.get("GMAIL_APP_PASSWORD")
