@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import smtplib
 from datetime import datetime, timezone, timedelta
@@ -18,13 +19,228 @@ def tw_strftime(fmt):
     """用台灣時間格式化時間字串"""
     return tw_now().strftime(fmt)
 
-def send_email(subject, body):
+def markdown_to_html(md_text):
+    """
+    將 Gemini 回傳的 Markdown 文字轉為美觀的 HTML Email 格式。
+    支援：表格、標題、粗體、清單、分隔線、行內程式碼。
+    """
+    lines = md_text.split('\n')
+    html_parts = []
+    in_table = False
+    in_ul = False
+    table_row_index = 0
+
+    for line in lines:
+        stripped = line.strip()
+
+        # --- 表格處理 ---
+        if stripped.startswith('|') and stripped.endswith('|'):
+            cells = [c.strip() for c in stripped.strip('|').split('|')]
+            # 跳過分隔行 (|---|---|)
+            if all(re.match(r'^[-:]+$', c) for c in cells):
+                continue
+            if not in_table:
+                # 開始新表格
+                if in_ul:
+                    html_parts.append('</ul>')
+                    in_ul = False
+                html_parts.append('<table>')
+                # 第一行當作表頭
+                header_cells = ''.join(
+                    f'<th>{inline_format(c)}</th>' for c in cells
+                )
+                html_parts.append(f'<tr class="header">{header_cells}</tr>')
+                in_table = True
+                table_row_index = 0
+                continue
+            else:
+                row_class = 'even' if table_row_index % 2 == 0 else 'odd'
+                row_cells = ''.join(
+                    f'<td>{inline_format(c)}</td>' for c in cells
+                )
+                html_parts.append(f'<tr class="{row_class}">{row_cells}</tr>')
+                table_row_index += 1
+                continue
+        else:
+            if in_table:
+                html_parts.append('</table>')
+                in_table = False
+                table_row_index = 0
+
+        # --- 空行 ---
+        if not stripped:
+            if in_ul:
+                html_parts.append('</ul>')
+                in_ul = False
+            html_parts.append('<br>')
+            continue
+
+        # --- 分隔線 ---
+        if re.match(r'^-{3,}$', stripped) or re.match(r'^\*{3,}$', stripped):
+            if in_ul:
+                html_parts.append('</ul>')
+                in_ul = False
+            html_parts.append('<hr>')
+            continue
+
+        # --- 標題 ---
+        h_match = re.match(r'^(#{1,4})\s+(.*)', stripped)
+        if h_match:
+            if in_ul:
+                html_parts.append('</ul>')
+                in_ul = False
+            level = len(h_match.group(1))
+            text = inline_format(h_match.group(2))
+            html_parts.append(f'<h{level}>{text}</h{level}>')
+            continue
+
+        # --- 清單 (- 或 * 或 數字.) ---
+        list_match = re.match(r'^[-*]\s+(.*)', stripped) or re.match(r'^\d+\.\s+(.*)', stripped)
+        if list_match:
+            if not in_ul:
+                html_parts.append('<ul>')
+                in_ul = True
+            html_parts.append(f'<li>{inline_format(list_match.group(1))}</li>')
+            continue
+
+        # --- 一般段落 ---
+        if in_ul:
+            html_parts.append('</ul>')
+            in_ul = False
+        html_parts.append(f'<p>{inline_format(stripped)}</p>')
+
+    # 收尾
+    if in_table:
+        html_parts.append('</table>')
+    if in_ul:
+        html_parts.append('</ul>')
+
+    body_content = '\n'.join(html_parts)
+
+    # 組合完整 HTML + CSS
+    html = f'''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {{
+    font-family: -apple-system, 'Microsoft JhengHei', 'Segoe UI', Arial, sans-serif;
+    background-color: #f4f6f9;
+    color: #2c3e50;
+    margin: 0; padding: 0;
+  }}
+  .container {{
+    max-width: 720px;
+    margin: 20px auto;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }}
+  .header-bar {{
+    background: linear-gradient(135deg, #1a237e 0%, #0d47a1 50%, #01579b 100%);
+    color: white;
+    padding: 24px 30px;
+  }}
+  .header-bar h1 {{
+    margin: 0; font-size: 22px; font-weight: 700;
+  }}
+  .header-bar .subtitle {{
+    margin-top: 6px; font-size: 13px; opacity: 0.85;
+  }}
+  .content {{
+    padding: 24px 30px 30px;
+  }}
+  h1 {{ color: #1a237e; font-size: 20px; border-bottom: 3px solid #1a237e; padding-bottom: 8px; margin-top: 28px; }}
+  h2 {{ color: #0d47a1; font-size: 17px; border-left: 4px solid #0d47a1; padding-left: 12px; margin-top: 24px; }}
+  h3 {{ color: #01579b; font-size: 15px; margin-top: 18px; }}
+  h4 {{ color: #37474f; font-size: 14px; margin-top: 14px; }}
+  p {{ line-height: 1.75; margin: 8px 0; font-size: 14px; }}
+  table {{
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 13px;
+  }}
+  tr.header {{
+    background: #1a237e;
+    color: white;
+  }}
+  tr.header th {{
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+  }}
+  tr.even {{ background-color: #f8f9fb; }}
+  tr.odd {{ background-color: #ffffff; }}
+  td {{
+    padding: 9px 12px;
+    border-bottom: 1px solid #e8eaed;
+    line-height: 1.5;
+  }}
+  ul {{
+    margin: 8px 0;
+    padding-left: 22px;
+  }}
+  li {{
+    line-height: 1.7;
+    margin-bottom: 4px;
+    font-size: 14px;
+  }}
+  hr {{
+    border: none;
+    border-top: 2px dashed #cfd8dc;
+    margin: 20px 0;
+  }}
+  strong {{ color: #c62828; }}
+  code {{
+    background: #eceff1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #37474f;
+  }}
+  .footer {{
+    text-align: center;
+    padding: 16px;
+    font-size: 11px;
+    color: #90a4ae;
+    background: #f4f6f9;
+  }}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header-bar">
+    <h1>📈 台股策略晨報</h1>
+    <div class="subtitle">Powered by Agentic AI &middot; {tw_strftime('%Y-%m-%d %H:%M')} (台灣時間)</div>
+  </div>
+  <div class="content">
+    {body_content}
+  </div>
+  <div class="footer">
+    本報告由 AI Agent 自動產生，數據來源為公開資訊，僅供參考，不構成投資建議。
+  </div>
+</div>
+</body>
+</html>'''
+    return html
+
+def inline_format(text):
+    """處理行內格式：粗體、行內程式碼"""
+    # 行內程式碼 `code`
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+    # 粗體 **text**
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+    return text
+
+def send_email(subject, html_body, plain_body):
     sender_email = "asingadmin@gmail.com"
     # ⭐ 在這裡設定多個收件人信箱（想加幾個就加幾個）
     receiver_emails = [
         "asingadmin@gmail.com",
-        # "second_user@gmail.com",   # 取消註解並填入第 2 個信箱
-        # "third_user@company.com",  # 取消註解並填入第 3 個信箱
+        "Kenfungkenfungkenfung@gmail.com",
     ]
 
     app_password = os.environ.get("GMAIL_APP_PASSWORD")
@@ -32,12 +248,15 @@ def send_email(subject, body):
         print("【警告】找不到 GMAIL_APP_PASSWORD 環境變數，無法發送郵件！")
         return
 
-    msg = MIMEMultipart()
+    msg = MIMEMultipart('alternative')
     msg['From'] = sender_email
     msg['To'] = ", ".join(receiver_emails)
     msg['Subject'] = subject
 
-    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+    # 附加純文字版本（備援，信箱不支援 HTML 時顯示）
+    msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
+    # 附加 HTML 版本（主要顯示內容）
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
@@ -45,7 +264,7 @@ def send_email(subject, body):
         server.login(sender_email, app_password)
         server.send_message(msg, to_addrs=receiver_emails)
         server.quit()
-        print(f"✅ 成功發送台股晨報 Email 至：{', '.join(receiver_emails)}！")
+        print(f"✅ 成功發送台股晨報 (HTML) Email 至：{', '.join(receiver_emails)}！")
     except Exception as e:
         print(f"❌ 發送郵件失敗：{e}")
 
@@ -84,6 +303,8 @@ def run_tw_stock_agent():
 ---
 
 # 【報告輸出格式】
+
+請使用 Markdown 格式輸出（包含表格、標題、粗體、清單），我的系統會自動將其轉為精美的 HTML Email。
 
 ## 1. 核心指標量化監控矩陣
 
@@ -153,6 +374,7 @@ def run_tw_stock_agent():
                         "請務必使用 Google 搜尋工具取得最新的財經數據與新聞，嚴禁捏造數據。"
                         "請依據每日最新財經新聞、總經數據與盤後籌碼，提煉出台股的中長期領先指標與當日短線預警。"
                         "所有分析結論必須精準、有力、可操作，避免空洞套話。"
+                        "請使用 Markdown 格式輸出，包含表格與標題，系統會自動轉為 HTML。"
                     )
                 )
             )
@@ -166,9 +388,12 @@ def run_tw_stock_agent():
     if success:
         print("\n【台股策略晨報】\n")
         print(report_content)
+        # 將 Markdown 轉為精美 HTML
+        html_body = markdown_to_html(report_content)
         send_email(
             subject=f"📈 [台股策略晨報] 領先指標與操盤戰略 ({tw_strftime('%Y-%m-%d %H:%M')})",
-            body=report_content
+            html_body=html_body,
+            plain_body=report_content
         )
     else:
         print("抱歉，目前沒有可用的模型能完成此任務。")
